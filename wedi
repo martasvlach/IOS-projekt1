@@ -1,0 +1,326 @@
+#!/bin/sh
+
+
+###################################################################
+# 					IOS - PROJEKT 1 (SKRIPT WEDI)				                  #
+#					   MARTIN VLACH - (xvlach18)				                    #
+#					  xvlach18@stud.fit.vutbr.cz				                    #
+###################################################################
+
+#-----------------------------------------------------------------
+export POSIXLY=CORRECT=yes
+#-----------------------------------------------------------------
+
+#============== ZAPSANI DO WEDI_RC A OTEVRENI EDITORU ============#
+
+editace()
+{
+   echo "$cesta_soubor"":""$(date +%Y-%m-%d)" >> "$WEDI_RC"
+  "$EDITOR" "$cesta_soubor"
+  if [ ! "$?" -eq 0 ];then
+  	echo " ! CHYBA - INTERNI CHYBA EDITORU">&2
+  exit 22
+  fi
+}
+
+#=======================FILE CHECK================================#
+
+# Otestovani zda li se jedna o EXISTUJICI soubor
+# Napriklad kdyby mi nekdo "zasahl" do LOGU
+
+file_check()
+{
+  if [ ! -f "$cesta_soubor" ];then
+    echo " ! CHYBA - $cesta_soubor NENI EXISTUJICI SOUBOR">&2
+    exit 7
+  fi
+}
+
+#================= OVERENI DOSTUPNOSTI REALPATH ==================#
+
+# Overeni dostupnosti UTILITY realpath na zarizeni
+# Pokud tato UTILITA dostupna neni, SKRIPT konci chybou
+
+rpTEST=$(realpath .)
+rpNK="$?"
+if [ ! "$rpNK" -eq 0 ];then
+	echo " ! CHYBA - UTILITA REALPATH NENI DOSUPNA">&2
+	exit 73
+fi
+
+#=================== OVERENI PROMENNE WEDI_RC ====================#
+
+# Overeni nastaveni PROMENNE WEDI_RC
+# V pripade ze je tato promenna prazdna, sktipt konci chybou
+# V pripade ze na danne ceste soubor neexistuje, soubor bude vytvoren
+# Jestlize neexistuje ani cesta, tak bude tez vytvorena
+
+if [ -z "$WEDI_RC" ];then
+  echo " ! CHYBA - PROMENNA WEDI RC NENI NASTAVENA">&2
+  exit 1
+fi
+if [ ! -f "$WEDI_RC" ];then
+  mkdir -p "$(dirname "$WEDI_RC")" && touch "$WEDI_RC" && chmod 777 "$WEDI_RC"
+fi
+if [ ! -w "$WEDI_RC" ];then
+  echo " ! CHYBA - NEMAME PRAVA K ZAPISU DO WEDI_RC">&2
+  exit 41
+fi
+
+#=================================================================#
+
+# Kontrola aktualnosti LOGU (ODSTANENI NYNI NEEXISTUJICH SOUBORU Z LOGU)
+# Pokud soubor ktery se nachazi v LOGU nyni uz neexistije vymazu jej z nej
+# sktipt WEDI nema brat v potaz soubory ktere nyni uz neexistuji
+
+pocet_lines="$(cat < "$WEDI_RC" | sort | uniq)"
+for line in $pocet_lines;do
+	now_line="$(echo "$line" | cut -d':' -f1)"
+	if [ ! -f "$now_line" ];then
+		echo "$now_line" | sed -i -e "s|$now_line:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]| |g" "$WEDI_RC"
+	fi
+done
+sed -i -e '/^\s*$/d' "$WEDI_RC" # white lines odstraneni
+
+#=====================  NASTAVENI EDITORU ========================#
+
+# Nastaveni EDITORU pro editaci souboru dle nasledujich priorit
+# 1. $EDITOR - 2. $VISUAL - 3. kdyz ani jedna z nich neni nastavena pouzije se EDITOR vi
+# Nasledne kontroluji dostupnost zvoleneho EDITORU na danem zarizeni
+
+
+if [ -z "$EDITOR" ] && [ -z "$VISUAL" ];then
+    EDITOR="vi"
+  fi
+  if [ -z "$EDITOR" ] && [ -n "$VISUAL" ];then
+    EDITOR="$VISUAL"
+  fi
+  test_e=$(which "$EDITOR")
+  if [ ! -f "$test_e" ];then
+  		echo " ! CHYBA - ZVOLENY EDITOR NENI DOSTUPNY">&2
+  		exit 2
+  fi
+
+  #=============  POKUD JE ZADANY ARGUMENT SOUBOR ==================#
+
+  # Pokud je skriptu zadan platny soubor spusti se jeho editace EDITOREM
+
+  if [ -f "$1" ] && [ "$#" -eq 1 ];then
+   cesta_soubor="$(realpath "$1")"
+   editace
+
+ #=============== POKUD JE ZADANY ARGUMENT ADRESAR =================#
+
+ # Pokud je skriptu zadan adresar postup je nasleduji
+ # Pokud nebyl v zadanem adresari editovan jeste zadny soubor skript se ukonci chybou
+ # Pokud byl v adresari editovan jediny soubor spusti se jeho editace
+ # Pokud bylo v adresari editovano vice souboru spusti se editace POSLEDNIHO editovaneho
+ # Pokud je skript spusten bez argumentu predpoklada se aktualni adresar
+
+ elif [ -d "$1" ] || [ "$#" -eq 0 ];then
+
+ 	if [ -d "$1" ] && [ "$#" -gt 1 ];then
+ 		echo " ! CHYBA - PRILIS MNOHO ARGUMENTU">&2
+ 		exit 3
+ 	fi
+
+ 	if [ "$#" -eq 1 ];then
+ 		jmeno_adresare="$(realpath "$1")"
+ 	else
+ 		jmeno_adresare="$(realpath .)"
+ 	fi
+
+ pocet_soboru="$(grep "$jmeno_adresare/[^/]*$" "$WEDI_RC" | sort | uniq | wc -l)"
+
+ #------------ POKUD NEBYL V ADRESARI JESTE EDITOVAN ZADNY SOUBOR
+
+  if [ "$pocet_soboru" -eq 0 ];then
+    echo " ! CHYBA - V ZADANEM ADRESARI NEBYL EDITOVAN ZADNY SOUBOR NEBO BYL SMAZAN">&2
+    exit 4
+  fi
+
+  #------------ POKUD BYL V ADRESARI EDITOVAN JEDINY SOUBOR
+
+  if [ "$pocet_soboru" -eq 1 ];then
+  	cesta_soubor=$(grep "$jmeno_adresare/[^/]*$" "$WEDI_RC" | sort | uniq | cut -d':' -f1)
+  	file_check
+  	editace
+  fi
+
+#------------ POKUD BYL V ADRESARI EDITOVANO VICE SOUBORU
+
+  if [ "$pocet_soboru" -gt 1 ];then
+  	cesta_soubor=$(grep "$jmeno_adresare/[^/]*$" "$WEDI_RC" | tail -n1 | cut -d':' -f1)
+  	file_check
+  	editace
+  fi
+
+#========================= ARGUMENT -L ================================#
+
+# Pokud je sktipt spusten s argumentem '-l' vypisi se soubory ktere byli v dannem adresari editovane pomoci skriptu
+# Pokud neni zadan adresar, predpoklada se aktualni
+
+ elif [ "$1" = "-l" ];then
+
+ 	if [ "$#" -gt 2 ];then
+ 		echo " ! CHYBA - PRILIS MNOHO ARGUMENTU">&2
+ 		exit 3
+ 	fi
+
+ 	if [ "$#" -eq 2 ] && [ ! -d "$(realpath "$2")" ] ;then
+ 		echo " ! CHYBA - ZADANY ARGUMENT NENI ADRESAR">&2
+ 		exit 11
+ 	fi
+
+ 	if [ "$#" -eq 2 ];then
+ 		jmeno_adresare="$(realpath "$2")"
+ 	else
+ 		jmeno_adresare="$(realpath .)"
+ 	fi
+
+ 	if [ "$#" -eq 1 ];then
+ 		 grep "$jmeno_adresare/[^/]*$" "$WEDI_RC" | sort | uniq | cut -d':' -f1 | rev | cut -d'/' -f1 | rev >&1
+ 	else
+ 		grep "$jmeno_adresare/[^/]*$" "$WEDI_RC" | sort | uniq | cut -d':' -f1
+ 	fi
+
+#========================= ARGUMENT -M ================================#
+
+# Pokud je sktiptu zadan argument '-m' stusti se editace souboru ktery byl z danem adresari editovan nejvicekrat
+# Pokud neni skriptu zadan adresar predpoklada se aktualni
+
+elif [ "$1" = "-m" ];then
+
+	if [ "$#" -gt 2 ];then
+ 		echo " ! CHYBA - PRILIS MNOHO ARGUMENTU">&2
+ 		exit 3
+ 	fi
+
+ 	if [ "$#" -eq 2 ] && [ ! -d "$(realpath "$2")" ] ;then
+ 		echo " ! CHYBA - ZADANY ARGUMENT NENI ADRESAR">&2
+ 		exit 11
+ 	fi
+
+ 	if [ "$#" -eq 2 ];then
+ 		jmeno_adresare="$(realpath "$2")"
+ 	else
+ 		jmeno_adresare="$(realpath .)"
+ 	fi
+
+ 	cesta_soubor=$(grep "$jmeno_adresare/[^/]*$" "$WEDI_RC" | sort | uniq -c | sort -n | tail -n1 | awk '{print $2}' | cut -d':' -f1)
+
+  if [ -z "$cesta_soubor" ];then
+    echo " ! CHYBA - V ZADANEM ADRESARI NEBYL EDITOVAN ZADNY SOUBOR NEBO BYL SMAZAN">&2
+    exit 4
+  fi
+
+  file_check
+  editace
+
+#====================== ARGUMENT -b =====================================#
+
+# Pokud je skript spusten s argumentem '-b' + datum ve formatu YYYY-MM-YY vypisi se soubory
+# ktere byli v dannem adresari editovany PRED zadanym datem
+
+elif [ "$1" = "-b" ];then
+
+if [ "$1" = "-b" ] && [ "$#" -lt 2 ];then
+  echo " ! CHYBA - PRILIS MALO ARGUMENTU">&2
+  exit 11
+fi
+
+if [ "$1" = "-b" ] && [ "$#" -gt 3 ];then
+  echo " ! CHYBA - PRILIS MNOHO ARGUMENTU">&2
+  exit 3
+fi
+
+if [ "$#" -eq 3 ] && [ ! -d "$(realpath "$3")" ] ;then
+ 		echo " ! CHYBA - ZADANY ARGUMENT NENI ADRESAR">&2
+ 		exit 11
+fi
+
+  echo "$2" | grep '^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' > /dev/null #overeni data
+  if [ "$?" -eq 1 ];then
+  	echo " ! CHYBA - ARGUMENT PRO DATUM NENI VE SPRAVEM FORMATU POUZIJTE FORMAT (YYYY-MM-DD)">&2
+  	exit 66
+  fi
+
+  arg_dat=$(echo "$2" | sed 's/-//g') #prevod data na cislo
+  if [ "$#" -eq 2 ];then
+  	jmeno_adresare="$(realpath .)"
+   else
+   jmeno_adresare="$(realpath "$3")"
+  fi
+
+  modifikovaneZaznamy=$(grep "$jmeno_adresare/[^/]*$" "$WEDI_RC" | sort |  uniq | sed 's/-//g')
+  for unit in $modifikovaneZaznamy;do
+    aktualcislo=$(echo "$unit" | cut -d':' -f2)
+    if [ "$aktualcislo" -le "$arg_dat" ];then
+      if [ "$#" -eq 3 ];then
+      var=$(echo "$unit" | cut -d':' -f1)
+      else
+      var=$(echo "$unit" | cut -d':' -f1 | rev | cut -d'/' -f1 | rev)
+      fi
+      if [ "$var" != "$minulyVypis" ];then
+        echo "$var"
+        minulyVypis="$var"
+      fi
+    fi
+  done
+
+#====================== ARGUMENT -a =====================================#
+
+# Pokud je skript spusten s argumentem '-a' + datum ve formatu YYYY-MM-YY vypisi se soubory
+# ktere byli v dannem adresari editovany PO zadanem datu
+
+elif [ "$1" = "-a" ];then
+
+if [ "$1" = "-a" ] && [ "$#" -lt 2 ];then
+  echo " ! CHYBA - PRILIS MALO ARGUMENTU">&2
+  exit 11
+fi
+
+if [ "$1" = "-a" ] && [ "$#" -gt 3 ];then
+  echo " ! CHYBA - PRILIS MNOHO ARGUMENTU">&2
+  exit 3
+fi
+
+if [ "$#" -eq 3 ] && [ ! -d "$(realpath "$3")" ] ;then
+ 		echo " ! CHYBA - ZADANY ARGUMENT NENI ADRESAR">&2
+ 		exit 11
+fi
+
+  echo "$2" | grep '^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' > /dev/null #overeni data
+  if [ "$?" -eq 1 ];then
+  	echo " ! CHYBA - Argument pro datum neni spravny (YYYY-MM-DD)">&2
+  	exit 66
+  fi
+
+  arg_dat=$(echo "$2" | sed 's/-//g') #prevod data na cislo
+  if [ "$#" -eq 2 ];then
+  	jmeno_adresare="$(realpath .)"
+   else
+   jmeno_adresare="$(realpath "$3")"
+  fi
+
+  modifikovaneZaznamy=$(grep "$jmeno_adresare/[^/]*$" "$WEDI_RC" | sort |  uniq | sed 's/-//g')
+  for unit in $modifikovaneZaznamy;do
+    aktualcislo=$(echo "$unit" | cut -d':' -f2)
+    if [ "$aktualcislo" -ge "$arg_dat" ];then
+      if [ "$#" -eq 3 ];then
+      var=$(echo "$unit" | cut -d':' -f1)
+      else
+      var=$(echo "$unit" | cut -d':' -f1 | rev | cut -d'/' -f1 | rev)
+      fi
+      if [ "$var" != "$minulyVypis" ];then
+        echo "$var"
+        minulyVypis="$var"
+      fi
+    fi
+  done
+
+#======================================================================#
+else
+	echo " ! CHYBA - NEBYLA ZADANA PLATNA KOMBINACE ARGUMENTU NEBO ZVOLENY SOUBOR NEEXISTUJE">&2
+	exit 9
+fi
